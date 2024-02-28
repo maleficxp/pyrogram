@@ -19,6 +19,7 @@
 import asyncio
 import logging
 import signal
+import time
 from signal import signal as signal_fn, SIGINT, SIGTERM, SIGABRT
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ signals = {
     k: v for v, k in signal.__dict__.items()
     if v.startswith("SIG") and not v.startswith("SIG_")
 }
+stop_instances = dict()
 
 
 async def idle():
@@ -73,6 +75,9 @@ async def idle():
 
     def signal_handler(signum, __):
         logging.info(f"Stop signal received ({signals[signum]}). Exiting...")
+        for inst in stop_instances.values():
+            inst.shutdown()
+            time.sleep(2)
         task.cancel()
 
     for s in (SIGINT, SIGTERM, SIGABRT):
