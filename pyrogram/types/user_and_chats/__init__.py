@@ -16,6 +16,13 @@
 #  You should have received a copy of the GNU Lesser General Public License
 #  along with Pyrogram.  If not, see <http://www.gnu.org/licenses/>.
 
+from .birthday import Birthday
+from .business_connection import BusinessConnection
+from .business_info import BusinessInfo
+from .business_intro import BusinessIntro
+from .business_recipients import BusinessRecipients
+from .business_weekly_open import BusinessWeeklyOpen
+from .business_working_hours import BusinessWorkingHours
 from .chat import Chat
 from .chat_admin_with_invite_links import ChatAdminWithInviteLinks
 from .chat_color import ChatColor
@@ -44,6 +51,13 @@ from .video_chat_scheduled import VideoChatScheduled
 from .video_chat_started import VideoChatStarted
 
 __all__ = [
+    "Birthday",
+    "BusinessConnection",
+    "BusinessInfo",
+    "BusinessIntro",
+    "BusinessRecipients",
+    "BusinessWeeklyOpen",
+    "BusinessWorkingHours",
     "Chat",
     "ChatMember",
     "ChatPermissions",

@@ -163,6 +163,10 @@ class Client(Methods):
             Useful for batch programs that don't need to deal with updates.
             Defaults to False (updates enabled and received).
 
+        skip_updates (``bool``, *optional*):
+            Pass True to skip pending updates that arrived while the client was offline.
+            Defaults to True.
+
         takeout (``bool``, *optional*):
             Pass True to let the client use a takeout session instead of a normal one, implies *no_updates=True*.
             Useful for exporting Telegram data. Methods invoked inside a takeout session (such as get_chat_history,
@@ -181,16 +185,20 @@ class Client(Methods):
             Defaults to False, because ``getpass`` (the library used) is known to be problematic in some
             terminal environments.
 
-        max_concurrent_transmissions (``bool``, *optional*):
+        max_concurrent_transmissions (``int``, *optional*):
             Set the maximum amount of concurrent transmissions (uploads & downloads).
             A value that is too high may result in network related issues.
             Defaults to 1.
+
+        max_message_cache_size (``int``, *optional*):
+            Set the maximum size of the message cache.
+            Defaults to 10000.
 
         storage_engine (:obj:`~pyrogram.storage.Storage`, *optional*):
             Pass an instance of your own implementation of session storage engine.
             Useful when you want to store your session in databases like Mongo, Redis, etc.
 
-        init_connection_params (:obj:`~raw.base.JSONValue`, *optional*):
+        init_connection_params (:obj:`~pyrogram.raw.base.JSONValue`, *optional*):
             Additional initConnection parameters.
             For now, only the tz_offset field is supported, for specifying timezone offset in seconds.
     """
@@ -213,6 +221,7 @@ class Client(Methods):
     UPDATES_WATCHDOG_INTERVAL = 15 * 60
 
     MAX_CONCURRENT_TRANSMISSIONS = 1
+    MAX_MESSAGE_CACHE_SIZE = 10000
 
     mimetypes = MimeTypes()
     mimetypes.readfp(StringIO(mime_types))
@@ -242,12 +251,14 @@ class Client(Methods):
         plugins: dict = None,
         parse_mode: "enums.ParseMode" = enums.ParseMode.DEFAULT,
         no_updates: bool = None,
+        skip_updates: bool = True,
         takeout: bool = None,
         sleep_threshold: int = Session.SLEEP_THRESHOLD,
         hide_password: bool = False,
         max_concurrent_transmissions: int = MAX_CONCURRENT_TRANSMISSIONS,
+        max_message_cache_size: int = MAX_MESSAGE_CACHE_SIZE,
         storage_engine: Storage = None,
-        init_connection_params: "raw.base.JSONValue" = None,
+        init_connection_params: "raw.base.JSONValue" = None
     ):
         super().__init__()
 
@@ -274,13 +285,17 @@ class Client(Methods):
         self.plugins = plugins
         self.parse_mode = parse_mode
         self.no_updates = no_updates
+        self.skip_updates = skip_updates
         self.takeout = takeout
         self.sleep_threshold = sleep_threshold
         self.hide_password = hide_password
         self.max_concurrent_transmissions = max_concurrent_transmissions
+        self.max_message_cache_size = max_message_cache_size
         self.init_connection_params = init_connection_params
 
         self.executor = ThreadPoolExecutor(self.workers, thread_name_prefix="Handler")
+
+        self.storage: Storage
 
         if self.session_string:
             self.storage = MemoryStorage(self.name, self.session_string)
@@ -291,13 +306,18 @@ class Client(Methods):
         else:
             self.storage = FileStorage(self.name, self.workdir)
 
-        self.dispatcher = Dispatcher(self)
+        self.dispatcher: Dispatcher = Dispatcher(self)
 
         self.rnd_id = MsgId
 
-        self.parser = Parser(self)
+        self.parser: Parser = Parser(self)
 
-        self.session = None
+        self.session: Optional[Session] = None
+
+        self.business_connections = {}
+
+        self.sessions = {}
+        self.sessions_lock = asyncio.Lock()
 
         self.media_sessions = {}
         self.media_sessions_lock = asyncio.Lock()
@@ -314,7 +334,7 @@ class Client(Methods):
 
         self.me: Optional[User] = None
 
-        self.message_cache = Cache(10000)
+        self.message_cache = Cache(self.max_message_cache_size)
 
         # Sometimes, for some reason, the server will stop sending updates and will only respond to pings.
         # This watchdog will invoke updates.GetState in order to wake up the server and enable it sending updates again
@@ -583,6 +603,17 @@ class Client(Methods):
                 pts = getattr(update, "pts", None)
                 pts_count = getattr(update, "pts_count", None)
 
+                if pts:
+                    await self.storage.update_state(
+                        (
+                            utils.get_channel_id(channel_id) if channel_id else 0,
+                            pts,
+                            None,
+                            updates.date,
+                            updates.seq
+                        )
+                    )
+
                 if isinstance(update, raw.types.UpdateChannelTooLong):
                     log.info(update)
 
@@ -613,6 +644,16 @@ class Client(Methods):
 
                 self.dispatcher.updates_queue.put_nowait((update, users, chats))
         elif isinstance(updates, (raw.types.UpdateShortMessage, raw.types.UpdateShortChatMessage)):
+            await self.storage.update_state(
+                (
+                    0,
+                    updates.pts,
+                    None,
+                    updates.date,
+                    None
+                )
+            )
+
             diff = await self.invoke(
                 raw.functions.updates.GetDifference(
                     pts=updates.pts - updates.pts_count,

@@ -18,6 +18,7 @@
 
 from .advanced import Advanced
 from .auth import Auth
+from .business import Business
 from .bots import Bots
 from .chats import Chats
 from .contacts import Contacts
@@ -25,6 +26,7 @@ from .decorators import Decorators
 from .invite_links import InviteLinks
 from .messages import Messages
 from .password import Password
+from .payments import Payments
 from .premium import Premium
 from .users import Users
 from .stories import Stories
@@ -34,9 +36,11 @@ from .utilities import Utilities
 class Methods(
     Advanced,
     Auth,
+    Business,
     Bots,
     Contacts,
     Password,
+    Payments,
     Premium,
     Chats,
     Users,

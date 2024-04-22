@@ -25,7 +25,7 @@ import pyrogram
 from pyrogram import raw, enums
 from pyrogram import types
 from pyrogram import utils
-from pyrogram.errors import MessageIdsEmpty, PeerIdInvalid, ChannelPrivate, BotMethodInvalid, ChannelForumMissing
+from pyrogram.errors import ChannelPrivate, MessageIdsEmpty, PeerIdInvalid, ChannelPrivate, BotMethodInvalid, ChannelForumMissing
 from pyrogram.parser import utils as parser_utils, Parser
 from ..object import Object
 from ..update import Update
@@ -300,6 +300,9 @@ class Message(Object, Update):
         forwards (``int``, *optional*):
             Channel post forwards.
 
+        sender_boost_count (``int``, *optional*):
+            The number of boosts applied by the sender.
+
         via_bot (:obj:`~pyrogram.types.User`):
             The information of the bot that generated the message from an inline query of a user.
 
@@ -368,6 +371,11 @@ class Message(Object, Update):
 
         boosts_applied (``int``, *optional*):
             Service message: how many boosts were applied.
+
+        business_connection_id (``str``, *optional*):
+            Unique identifier of the business connection from which the message was received.
+            If non-empty, the message belongs to a chat of the corresponding business account that is independent from any potential bot chat which might share the same identifier.
+            This update may at times be triggered by unavailable changes to message fields that are either unavailable or not actively used by the current bot.
 
         reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
             Additional interface options. An object for an inline keyboard, custom reply keyboard,
@@ -459,6 +467,7 @@ class Message(Object, Update):
         game_high_score: int = None,
         views: int = None,
         forwards: int = None,
+        sender_boost_count: int = None,
         via_bot: "types.User" = None,
         outgoing: bool = None,
         quote: bool = None,
@@ -480,6 +489,7 @@ class Message(Object, Update):
         giveaway_launched: bool = None,
         chat_ttl_period: int = None,
         boosts_applied: int = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -561,11 +571,13 @@ class Message(Object, Update):
         self.game_high_score = game_high_score
         self.views = views
         self.forwards = forwards
+        self.sender_boost_count = sender_boost_count
         self.via_bot = via_bot
         self.outgoing = outgoing
         self.quote = quote
         self.matches = matches
         self.command = command
+        self.business_connection_id = business_connection_id
         self.reply_markup = reply_markup
         self.forum_topic_created = forum_topic_created
         self.forum_topic_closed = forum_topic_closed
@@ -594,10 +606,18 @@ class Message(Object, Update):
         chats: dict,
         topics: dict = None,
         is_scheduled: bool = False,
-        replies: int = 1
+        replies: int = 1,
+        business_connection_id: str = None,
+        reply_to_message: "raw.base.Message" = None
     ):
         if isinstance(message, raw.types.MessageEmpty):
-            return Message(id=message.id, empty=True, client=client, raw=message)
+            return Message(
+                id=message.id,
+                empty=True,
+                business_connection_id=business_connection_id,
+                raw=message,
+                client=client,
+            )
 
         from_id = utils.get_raw_peer_id(message.from_id)
         peer_id = utils.get_raw_peer_id(message.peer_id)
@@ -774,6 +794,7 @@ class Message(Object, Update):
                 requested_chats=requested_chats,
                 chat_ttl_period=chat_ttl_period,
                 boosts_applied=boosts_applied,
+                business_connection_id=business_connection_id,
                 raw=message,
                 client=client
                 # TODO: supergroup_chat_created
@@ -1049,8 +1070,10 @@ class Message(Object, Update):
                 dice=dice,
                 views=message.views,
                 forwards=message.forwards,
+                sender_boost_count=getattr(message, "from_boosts_applied", None),
                 via_bot=types.User._parse(client, users.get(message.via_bot_id, None)),
                 outgoing=message.out,
+                business_connection_id=business_connection_id,
                 reply_markup=reply_markup,
                 reactions=reactions,
                 raw=message,
@@ -1120,6 +1143,8 @@ class Message(Object, Update):
                                     pass
                             if reply_to_message and not reply_to_message.forum_topic_created:
                                 parsed_message.reply_to_message = reply_to_message
+                        except ChannelPrivate:
+                            pass
                         except MessageIdsEmpty:
                             pass
                     elif parsed_message.reply_to_story_id:
@@ -1201,6 +1226,7 @@ class Message(Object, Update):
         quote_entities: List["types.MessageEntity"] = None,
         schedule_date: datetime = None,
         protect_content: bool = None,
+        business_connection_id: str = None,
         reply_markup=None
     ) -> "Message":
         """Bound method *reply_text* of :obj:`~pyrogram.types.Message`.
@@ -1268,6 +1294,9 @@ class Message(Object, Update):
             protect_content (``bool``, *optional*):
                 Protects the contents of the sent message from forwarding and saving.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -1287,6 +1316,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_message(
             chat_id=self.chat.id,
             text=text,
@@ -1301,6 +1333,7 @@ class Message(Object, Update):
             quote_entities=quote_entities,
             schedule_date=schedule_date,
             protect_content=protect_content,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
@@ -1319,6 +1352,7 @@ class Message(Object, Update):
         height: int = 0,
         thumb: str = None,
         disable_notification: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -1405,6 +1439,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -1448,6 +1485,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_animation(
             chat_id=self.chat.id,
             animation=animation,
@@ -1464,6 +1504,7 @@ class Message(Object, Update):
             reply_to_message_id=reply_to_message_id,
             quote_text=quote_text,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -1485,6 +1526,7 @@ class Message(Object, Update):
         reply_to_message_id: int = None,
         quote_text: str = None,
         quote_entities: List["types.MessageEntity"] = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -1564,6 +1606,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -1607,6 +1652,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_audio(
             chat_id=self.chat.id,
             audio=audio,
@@ -1622,6 +1670,7 @@ class Message(Object, Update):
             reply_to_message_id=reply_to_message_id,
             quote_text=quote_text,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -1639,6 +1688,7 @@ class Message(Object, Update):
         reply_to_message_id: int = None,
         quote_text: str = None,
         quote_entities: List["types.MessageEntity"] = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -1699,6 +1749,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -1718,6 +1771,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_cached_media(
             chat_id=self.chat.id,
             file_id=file_id,
@@ -1729,10 +1785,15 @@ class Message(Object, Update):
             reply_to_message_id=reply_to_message_id,
             quote_text=quote_text,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
-    async def reply_chat_action(self, action: "enums.ChatAction") -> bool:
+    async def reply_chat_action(
+        self,
+        action: "enums.ChatAction",
+        business_connection_id: str = None
+    ) -> bool:
         """Bound method *reply_chat_action* of :obj:`~pyrogram.types.Message`.
 
         Use as a shortcut for:
@@ -1757,6 +1818,9 @@ class Message(Object, Update):
             action (:obj:`~pyrogram.enums.ChatAction`):
                 Type of action to broadcast.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
         Returns:
             ``bool``: On success, True is returned.
 
@@ -1764,9 +1828,13 @@ class Message(Object, Update):
             RPCError: In case of a Telegram RPC error.
             ValueError: In case the provided string is not a valid chat action.
         """
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_chat_action(
             chat_id=self.chat.id,
-            action=action
+            action=action,
+            business_connection_id=business_connection_id
         )
 
     async def reply_contact(
@@ -1782,6 +1850,7 @@ class Message(Object, Update):
         quote_text: str = None,
         parse_mode: Optional["enums.ParseMode"] = None,
         quote_entities: List["types.MessageEntity"] = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -1845,6 +1914,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -1864,6 +1936,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_contact(
             chat_id=self.chat.id,
             phone_number=phone_number,
@@ -1876,6 +1951,7 @@ class Message(Object, Update):
             quote_text=quote_text,
             parse_mode=parse_mode,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
@@ -1896,6 +1972,7 @@ class Message(Object, Update):
         quote_entities: List["types.MessageEntity"] = None,
         schedule_date: datetime = None,
         protect_content: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -1985,6 +2062,9 @@ class Message(Object, Update):
             protect_content (``bool``, *optional*):
                 Protects the contents of the sent message from forwarding and saving.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -2028,6 +2108,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_document(
             chat_id=self.chat.id,
             document=document,
@@ -2044,6 +2127,7 @@ class Message(Object, Update):
             quote_entities=quote_entities,
             schedule_date=schedule_date,
             protect_content=protect_content,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -2056,6 +2140,7 @@ class Message(Object, Update):
         disable_notification: bool = None,
         message_thread_id: int = None,
         reply_to_message_id: int = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -2099,6 +2184,9 @@ class Message(Object, Update):
             reply_to_message_id (``int``, *optional*):
                 If the message is a reply, ID of the original message.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup`, *optional*):
                 An object for an inline keyboard. If empty, one ‘Play game_title’ button will be shown automatically.
                 If not empty, the first button must launch the game.
@@ -2118,12 +2206,16 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_game(
             chat_id=self.chat.id,
             game_short_name=game_short_name,
             disable_notification=disable_notification,
             message_thread_id=message_thread_id,
             reply_to_message_id=reply_to_message_id,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
@@ -2226,6 +2318,7 @@ class Message(Object, Update):
         reply_to_message_id: int = None,
         quote_text: str = None,
         quote_entities: List["types.MessageEntity"] = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -2279,6 +2372,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -2298,6 +2394,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_location(
             chat_id=self.chat.id,
             latitude=latitude,
@@ -2307,6 +2406,7 @@ class Message(Object, Update):
             reply_to_message_id=reply_to_message_id,
             quote_text=quote_text,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
@@ -2385,6 +2485,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_media_group(
             chat_id=self.chat.id,
             media=media,
@@ -2410,6 +2513,7 @@ class Message(Object, Update):
         reply_to_message_id: int = None,
         quote_text: str = None,
         quote_entities: List["types.MessageEntity"] = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -2482,6 +2586,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -2525,6 +2632,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_photo(
             chat_id=self.chat.id,
             photo=photo,
@@ -2538,6 +2648,7 @@ class Message(Object, Update):
             reply_to_message_id=reply_to_message_id,
             quote_text=quote_text,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -2566,6 +2677,7 @@ class Message(Object, Update):
         parse_mode: Optional["enums.ParseMode"] = None,
         quote_entities: List["types.MessageEntity"] = None,
         schedule_date: datetime = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -2688,6 +2800,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_poll(
             chat_id=self.chat.id,
             question=question,
@@ -2710,6 +2825,7 @@ class Message(Object, Update):
             parse_mode=parse_mode,
             quote_entities=quote_entities,
             schedule_date=schedule_date,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
@@ -2723,6 +2839,7 @@ class Message(Object, Update):
         quote_text: str = None,
         parse_mode: Optional["enums.ParseMode"] = None,
         quote_entities: List["types.MessageEntity"] = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -2781,6 +2898,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -2824,6 +2944,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_sticker(
             chat_id=self.chat.id,
             sticker=sticker,
@@ -2833,6 +2956,7 @@ class Message(Object, Update):
             quote_text=quote_text,
             parse_mode=parse_mode,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -2853,6 +2977,7 @@ class Message(Object, Update):
         quote_text: str = None,
         parse_mode: Optional["enums.ParseMode"] = None,
         quote_entities: List["types.MessageEntity"] = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -2925,6 +3050,9 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -2944,6 +3072,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_venue(
             chat_id=self.chat.id,
             latitude=latitude,
@@ -2958,6 +3089,7 @@ class Message(Object, Update):
             quote_text=quote_text,
             parse_mode=parse_mode,
             quote_entities=quote_entities,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
@@ -2980,6 +3112,8 @@ class Message(Object, Update):
         reply_to_message_id: int = None,
         quote_text: str = None,
         quote_entities: List["types.MessageEntity"] = None,
+        no_sound: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -3070,6 +3204,13 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
+            no_sound (``bool``, *optional*):
+                Pass True, if the uploaded video is a video message with no sound.
+                Doesn't work for external links.
+
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -3113,6 +3254,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_video(
             chat_id=self.chat.id,
             video=video,
@@ -3131,6 +3275,8 @@ class Message(Object, Update):
             reply_to_message_id=reply_to_message_id,
             quote_text=quote_text,
             quote_entities=quote_entities,
+            no_sound=no_sound,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -3150,7 +3296,8 @@ class Message(Object, Update):
         parse_mode: Optional["enums.ParseMode"] = None,
         quote_entities: List["types.MessageEntity"] = None,
         protect_content: bool = None,
-        ttl_seconds: int = None,
+        view_once: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -3224,10 +3371,12 @@ class Message(Object, Update):
             protect_content (``bool``, *optional*):
                 Protects the contents of the sent message from forwarding and saving.
 
-            ttl_seconds (``int``, *optional*):
+            view_once (``bool``, *optional*):
                 Self-Destruct Timer.
-                If you set a timer, the video note will self-destruct in *ttl_seconds*
-                seconds after it was viewed.
+                If True, the video note will self-destruct after it was viewed.
+
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
 
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
@@ -3272,6 +3421,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_video_note(
             chat_id=self.chat.id,
             video_note=video_note,
@@ -3285,7 +3437,8 @@ class Message(Object, Update):
             parse_mode=parse_mode,
             quote_entities=quote_entities,
             protect_content=protect_content,
-            ttl_seconds=ttl_seconds,
+            view_once=view_once,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -3304,7 +3457,8 @@ class Message(Object, Update):
         reply_to_message_id: int = None,
         quote_text: str = None,
         quote_entities: List["types.MessageEntity"] = None,
-        ttl_seconds: int = None,
+        view_once: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -3372,10 +3526,12 @@ class Message(Object, Update):
             quote_entities (List of :obj:`~pyrogram.types.MessageEntity`):
                 List of special entities that appear in quote text, which can be specified instead of *parse_mode*.
 
-            ttl_seconds (``int``, *optional*):
+            view_once (``bool``, *optional*):
                 Self-Destruct Timer.
-                If you set a timer, the voice note will self-destruct in *ttl_seconds*
-                seconds after it was listened.
+                If True, the voice note will self-destruct after it was listened.
+
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
 
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
@@ -3420,6 +3576,9 @@ class Message(Object, Update):
         if message_thread_id is None:
             message_thread_id = self.message_thread_id
 
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_voice(
             chat_id=self.chat.id,
             voice=voice,
@@ -3432,7 +3591,8 @@ class Message(Object, Update):
             reply_to_message_id=reply_to_message_id,
             quote_text=quote_text,
             quote_entities=quote_entities,
-            ttl_seconds=ttl_seconds,
+            view_once=view_once,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup,
             progress=progress,
             progress_args=progress_args
@@ -3441,6 +3601,7 @@ class Message(Object, Update):
     async def reply_web_page(
         self,
         text: str = None,
+        quote: bool = None,
         url: str = None,
         prefer_large_media: bool = None,
         prefer_small_media: bool = None,
@@ -3457,6 +3618,7 @@ class Message(Object, Update):
         quote_offset: int = None,
         schedule_date: datetime = None,
         protect_content: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -3539,6 +3701,9 @@ class Message(Object, Update):
             protect_content (``bool``, *optional*):
                 Protects the contents of the sent message from forwarding and saving.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -3546,6 +3711,18 @@ class Message(Object, Update):
         Returns:
             :obj:`~pyrogram.types.Message`: On success, the sent message is returned.
         """
+        if quote is None:
+            quote = self.chat.type != enums.ChatType.PRIVATE
+
+        if reply_to_message_id is None and quote:
+            reply_to_message_id = self.id
+
+        if message_thread_id is None:
+            message_thread_id = self.message_thread_id
+
+        if business_connection_id is None:
+            business_connection_id = self.business_connection_id
+
         return await self._client.send_web_page(
             chat_id=self.chat.id,
             text=text,
@@ -3565,6 +3742,7 @@ class Message(Object, Update):
             quote_offset=quote_offset,
             schedule_date=schedule_date,
             protect_content=protect_content,
+            business_connection_id=business_connection_id,
             reply_markup=reply_markup
         )
 
@@ -3574,6 +3752,7 @@ class Message(Object, Update):
         parse_mode: Optional["enums.ParseMode"] = None,
         entities: List["types.MessageEntity"] = None,
         disable_web_page_preview: bool = None,
+        show_above_text: bool = None,
         reply_markup: "types.InlineKeyboardMarkup" = None
     ) -> "Message":
         """Bound method *edit_text* of :obj:`~pyrogram.types.Message`.
@@ -3609,6 +3788,10 @@ class Message(Object, Update):
             disable_web_page_preview (``bool``, *optional*):
                 Disables link previews for links in this message.
 
+            show_above_text (``bool``, *optional*):
+                If True, link preview will be shown above the message text.
+                Otherwise, the link preview will be shown below the message text.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup`, *optional*):
                 An InlineKeyboardMarkup object.
 
@@ -3625,6 +3808,7 @@ class Message(Object, Update):
             parse_mode=parse_mode,
             entities=entities,
             disable_web_page_preview=disable_web_page_preview,
+            show_above_text=show_above_text,
             reply_markup=reply_markup
         )
 
@@ -3765,6 +3949,8 @@ class Message(Object, Update):
         chat_id: Union[int, str],
         message_thread_id: int = None,
         disable_notification: bool = None,
+        hide_sender_name: bool = None,
+        hide_captions: bool = None,
         schedule_date: datetime = None
     ) -> Union["types.Message", List["types.Message"]]:
         """Bound method *forward* of :obj:`~pyrogram.types.Message`.
@@ -3801,6 +3987,12 @@ class Message(Object, Update):
             schedule_date (:py:obj:`~datetime.datetime`, *optional*):
                 Date when the message will be automatically sent.
 
+            hide_sender_name (``bool``, *optional*):
+                If True, the original author of the message will not be shown.
+
+            hide_captions (``bool``, *optional*):
+                If True, the original media captions will be removed.
+
         Returns:
             On success, the forwarded Message is returned.
 
@@ -3813,7 +4005,9 @@ class Message(Object, Update):
             message_ids=self.id,
             message_thread_id=message_thread_id,
             disable_notification=disable_notification,
-            schedule_date=schedule_date
+            schedule_date=schedule_date,
+            hide_sender_name=hide_sender_name,
+            hide_captions=hide_captions
         )
 
     async def copy(
@@ -3831,6 +4025,7 @@ class Message(Object, Update):
         schedule_date: datetime = None,
         protect_content: bool = None,
         has_spoiler: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -3902,6 +4097,9 @@ class Message(Object, Update):
             has_spoiler (``bool``, *optional*):
                 True, if the message media is covered by a spoiler animation.
 
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
+
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
                 instructions to remove reply keyboard or to force a reply from the user.
@@ -3937,6 +4135,7 @@ class Message(Object, Update):
                 quote_entities=quote_entities,
                 schedule_date=schedule_date,
                 protect_content=protect_content,
+                business_connection_id=business_connection_id,
                 reply_markup=self.reply_markup if reply_markup is object else reply_markup
             )
         elif self.media:
@@ -3952,6 +4151,7 @@ class Message(Object, Update):
                 schedule_date=schedule_date,
                 protect_content=protect_content,
                 has_spoiler=has_spoiler,
+                business_connection_id=business_connection_id,
                 reply_markup=self.reply_markup if reply_markup is object else reply_markup
             )
 
@@ -3980,7 +4180,8 @@ class Message(Object, Update):
                     vcard=self.contact.vcard,
                     disable_notification=disable_notification,
                     message_thread_id=message_thread_id,
-                    schedule_date=schedule_date
+                    schedule_date=schedule_date,
+                    business_connection_id=business_connection_id
                 )
             elif self.location:
                 return await self._client.send_location(
@@ -3989,7 +4190,8 @@ class Message(Object, Update):
                     longitude=self.location.longitude,
                     disable_notification=disable_notification,
                     message_thread_id=message_thread_id,
-                    schedule_date=schedule_date
+                    schedule_date=schedule_date,
+                    business_connection_id=business_connection_id
                 )
             elif self.venue:
                 return await self._client.send_venue(
@@ -4002,7 +4204,8 @@ class Message(Object, Update):
                     foursquare_type=self.venue.foursquare_type,
                     disable_notification=disable_notification,
                     message_thread_id=message_thread_id,
-                    schedule_date=schedule_date
+                    schedule_date=schedule_date,
+                    business_connection_id=business_connection_id
                 )
             elif self.poll:
                 return await self._client.send_poll(
@@ -4011,7 +4214,8 @@ class Message(Object, Update):
                     options=[opt.text for opt in self.poll.options],
                     disable_notification=disable_notification,
                     message_thread_id=message_thread_id,
-                    schedule_date=schedule_date
+                    schedule_date=schedule_date,
+                    business_connection_id=business_connection_id
                 )
             elif self.game:
                 return await self._client.send_game(

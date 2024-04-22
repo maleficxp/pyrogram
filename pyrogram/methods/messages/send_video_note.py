@@ -49,7 +49,8 @@ class SendVideoNote:
         quote_offset: int = None,
         schedule_date: datetime = None,
         protect_content: bool = None,
-        ttl_seconds: int = None,
+        view_once: bool = None,
+        business_connection_id: str = None,
         reply_markup: Union[
             "types.InlineKeyboardMarkup",
             "types.ReplyKeyboardMarkup",
@@ -124,10 +125,12 @@ class SendVideoNote:
             protect_content (``bool``, *optional*):
                 Protects the contents of the sent message from forwarding and saving.
 
-            ttl_seconds (``int``, *optional*):
+            view_once (``bool``, *optional*):
                 Self-Destruct Timer.
-                If you set a timer, the video note will self-destruct in *ttl_seconds*
-                seconds after it was viewed.
+                If True, the video note will self-destruct after it was viewed.
+
+            business_connection_id (``str``, *optional*):
+                Unique identifier of the business connection on behalf of which the message will be sent.
 
             reply_markup (:obj:`~pyrogram.types.InlineKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardMarkup` | :obj:`~pyrogram.types.ReplyKeyboardRemove` | :obj:`~pyrogram.types.ForceReply`, *optional*):
                 Additional interface options. An object for an inline keyboard, custom reply keyboard,
@@ -170,7 +173,7 @@ class SendVideoNote:
                 await app.send_video_note("me", "video_note.mp4", length=25)
 
                 # Send self-destructing video note
-                await app.send_voice("me", "video_note.mp4", ttl_seconds=(1 << 31) - 1)
+                await app.send_video_note("me", "video_note.mp4", view_once=True)
         """
         file = None
 
@@ -191,7 +194,7 @@ class SendVideoNote:
                                 h=length
                             )
                         ],
-                        ttl_seconds=ttl_seconds
+                        ttl_seconds=(1 << 31) - 1 if view_once else None
                     )
                 else:
                     media = utils.get_input_media_from_file_id(video_note, FileType.VIDEO_NOTE)
@@ -209,7 +212,8 @@ class SendVideoNote:
                             w=length,
                             h=length
                         )
-                    ]
+                    ],
+                    ttl_seconds=(1 << 31) - 1 if view_once else None
                 )
 
             quote_text, quote_entities = (await utils.parse_text_entities(self, quote_text, parse_mode, quote_entities)).values()
@@ -236,7 +240,8 @@ class SendVideoNote:
                             noforwards=protect_content,
                             reply_markup=await reply_markup.write(self) if reply_markup else None,
                             message=""
-                        )
+                        ),
+                        business_connection_id=business_connection_id
                     )
                 except FilePartMissing as e:
                     await self.save_file(video_note, file_id=file.id, file_part=e.value)
@@ -244,12 +249,14 @@ class SendVideoNote:
                     for i in r.updates:
                         if isinstance(i, (raw.types.UpdateNewMessage,
                                           raw.types.UpdateNewChannelMessage,
-                                          raw.types.UpdateNewScheduledMessage)):
+                                          raw.types.UpdateNewScheduledMessage,
+                                          raw.types.UpdateBotNewBusinessMessage)):
                             return await types.Message._parse(
                                 self, i.message,
                                 {i.id: i for i in r.users},
                                 {i.id: i for i in r.chats},
-                                is_scheduled=isinstance(i, raw.types.UpdateNewScheduledMessage)
+                                is_scheduled=isinstance(i, raw.types.UpdateNewScheduledMessage),
+                                business_connection_id=getattr(i, "connection_id", None)
                             )
         except StopTransmission:
             return None
